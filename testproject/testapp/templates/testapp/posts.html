@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="{% url testapp_add_post %}">Add new post </a></p>
+<p>Filter by title: <form action="" method="post">
+                       {% csrf_token %}
+                       <input type="text" name="title_filter" value="{{filter}}"/>
+                       <input type="submit" value="Submit" />
+                    </form>
+</p>
+{% if filter %} <p><a href="{% url testapp_posts %}">Show all </a></p> {% endif %}
+<div >
+{% for post in posts %}
+
+ <div style="border-top:1px solid black;">
+   <h2>{{post.title}}</h2>
+   <p style="font-size:14px;">{{post.text|linebreaks}}</p>	
+ </div>
+ <div >
+  {% for answer in post.answer_set.all %}
+
+    <div style="font-size:12px;margin-top:20px;border:1px solid black;">{{answer.text|linebreaks}}</div>	
+
+  {% endfor %}
+  <p><a href="{% url testapp_add_answer post_id=post.id %}">Add answer </a></p>
+ </div>
+
+{% endfor %}
+</div>
+
+{% endblock %}

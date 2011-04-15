@@ -1,0 +1,11 @@
+{% if user.is_authenticated %}
+    {# display something else here... #}
+{% else %}
+    <form action="{% url login %}?next={{request.get_full_path}}" method="POST">
+	{% csrf_token %}
+        Username: <input id="username-field" name="username" type="text" />
+        Password: <input id="password-field" name="password" type="password" />
+        <button type="submit">Login</button>
+    </form>
+{% endif %}
+

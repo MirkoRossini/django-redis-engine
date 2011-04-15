@@ -1,0 +1,13 @@
+<ul id = "menulist">
+	<li><a href="/proposte/">Proposte</a></li>
+	<li><a href="/aggiungi_proposta/">Aggiungi Proposta</a></li>
+	<li><a href="/aproposito/">Info</a></li>
+	<li><a href="/come_aiutare/">Come Aiutare</a></li>
+	{% if request.user.is_authenticated %}
+		<li><a href="{% url logout %}?next={{request.get_full_path}}"  >Logout</a></li>
+	{% else %}
+		{# <li><a href="javascript::void(0);" onclick="$('#login').slideToggle()"  >Login</a></li> #}
+		<li><a href="{% url login %}?next={{request.get_full_path}}"  >Login</a></li>
+	{% endif %}
+	
+</ul>
