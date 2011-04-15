@@ -15,6 +15,16 @@ Optional Requirements
 ============
 * dbindexer
 
+Missing features
+===========
+DB creation support (raises exceptions)
+Test database support
+Some more redis indexes 
+
+Documentation (although testproject is self-documented)
+
+
+
 Contributing
 ============
 You are highly encouraged to participate in the development, simply use
