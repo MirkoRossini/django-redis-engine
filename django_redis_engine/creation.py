@@ -36,28 +36,27 @@ class DatabaseCreation(NonrelDatabaseCreation):
     }
 
     def sql_indexes_for_field(self, model, field, **kwargs):
-        """Create Indexes for field in model. Returns an empty List. (Django Compatibility)
+        """Create Indexes for field in model. 
 
-        :param model: The model containing field
-        :param f: The field to create indexes to.
-        :param \*\*kwargs: Extra kwargs not used in this engine.
+        Indexes are created rundime, no need for this.
+	Returns an empty List. (Django Compatibility)
         """
 
-        if field.db_index:
+        """if field.db_index:
             kwargs = {}
             opts = model._meta
             col = getattr(self.connection.db_connection, opts.db_table)
             descending = getattr(opts, "descending_indexes", [])
             direction =  (field.attname in descending and -1) or 1
             kwargs["unique"] = field.unique
-            col.ensure_index([(field.name, direction)], **kwargs)
+            col.ensure_index([(field.name, direction)], **kwargs)"""
         return []
 
     def index_fields_group(self, model, group, **kwargs):
         """Create indexes for fields in group that belong to model.
-            
+            TODO: Necessary?
         """
-        if not isinstance(group, dict):
+        """if not isinstance(group, dict):
             raise TypeError("Indexes group has to be instance of dict")
 
         fields = group.pop("fields")
@@ -80,16 +79,15 @@ class DatabaseCreation(NonrelDatabaseCreation):
                 from django.db.models.fields import FieldDoesNotExist
                 raise FieldDoesNotExist('%s has no field named %r' % (opts.object_name, field_name))
             checked_fields.append((field_name, direction))
-        col.ensure_index(checked_fields, **group)
+        col.ensure_index(checked_fields, **group)"""
 
     def sql_indexes_for_model(self, model, *args, **kwargs):
         """Creates ``model`` indexes.
 
-        :param model: The model containing the fields inside group.
-        :param \*args: Extra args not used in this engine.
-        :param \*\*kwargs: Extra kwargs not used in this engine.
+        Probably not necessary 
+	TODO Erase?
         """
-        if not model._meta.managed or model._meta.proxy:
+        """if not model._meta.managed or model._meta.proxy:
             return []
         fields = [f for f in model._meta.local_fields if f.db_index]
         if not fields and not hasattr(model._meta, "index_together") and not hasattr(model._meta, "unique_together"):
@@ -107,21 +105,13 @@ class DatabaseCreation(NonrelDatabaseCreation):
             unique_together = (unique_together,)
         for fields in unique_together:
             group = { "fields" : fields, "unique" : True}
-            self.index_fields_group(model, group)
+            self.index_fields_group(model, group)"""
         return []
 
     def sql_create_model(self, model, *args, **kwargs):
         """TODO delete...
         """
 	return [], {}
-        opts = model._meta
-        kwargs = {}
-        kwargs["capped"] = getattr(opts, "capped", False)
-        if hasattr(opts, "collection_max") and opts.collection_max:
-            kwargs["max"] = opts.collection_max
-        if hasattr(opts, "collection_size") and opts.collection_size:
-            kwargs["size"] = opts.collection_size
-        col = Collection(self.connection.db_connection, model._meta.db_table, **kwargs)
         
 
     def set_autocommit(self):
@@ -129,16 +119,12 @@ class DatabaseCreation(NonrelDatabaseCreation):
         pass
 
     def create_test_db(self, verbosity=1, autoclobber=False):
-        #TODO handle this
         if self.connection.settings_dict.get('TEST_NAME'):
             test_database_name = self.connection.settings_dict['TEST_NAME']
         elif 'NAME' in self.connection.settings_dict:
             test_database_name = TEST_DATABASE_PREFIX + self.connection.settings_dict['NAME']
         elif 'DATABASE_NAME' in self.connection.settings_dict:
             if self.connection.settings_dict['DATABASE_NAME'].startswith(TEST_DATABASE_PREFIX):
-                # already been set up
-                # must be because this is called from a setUp() instead of something formal.
-                # suspect this Django 1.1
                 test_database_name = self.connection.settings_dict['DATABASE_NAME']
             else:
                 test_database_name = TEST_DATABASE_PREFIX + \
@@ -173,7 +159,7 @@ class DatabaseCreation(NonrelDatabaseCreation):
 
     def _drop_database(self, database_name):
         """Drops the database with name database_name
-
-        :param database_name: The name of the database to drop.
+	
         """
-        self.connection._cursor().drop_database(database_name)
+        for k in self.connection._cursor().keys(database_name+'*'):
+		del self.connection._cursor()[k]

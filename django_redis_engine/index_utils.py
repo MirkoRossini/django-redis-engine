@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.utils.importlib import import_module
 from md5 import md5
-
+from redis_entity import *
 _MODULE_NAMES = getattr(settings, 'REDIS_SETTINGS_MODULES', ())
 
 #TODO update might overwrite field indexes
@@ -12,10 +12,7 @@ INDEX_KEY_INFIX = "redis_index"
 
 isiterable = lambda obj: getattr(obj, '__iter__', False)
 
-def hash_for_redis(val):
-	if isinstance(val,unicode):
-		return md5(val.encode('utf-8')).hexdigest()
-	return md5(str(val)).hexdigest()
+
 
 def val_for_insert(d):
 	if isinstance(d,unicode):
@@ -35,44 +32,44 @@ def get_indexes():
 	return indexes
 
 
-def create_indexes(column,data,indexes,conn,hash_record,table,pk):
+def create_indexes(column,data,indexes,conn,hash_record,table,pk,db_name):
 		for index in indexes:
 			if index == 'startswith':
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
 					d = val_for_insert(d)
-					conn.zadd(table +'_' + INDEX_KEY_INFIX + '_' + column + '_startswith',d+'_'+str(pk),0)
+					conn.zadd(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'startswith'),d+'_'+str(pk),0)
 			if index == 'istartswith':
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
 					d = val_for_insert(d).lower()
-					conn.zadd(table +'_' + INDEX_KEY_INFIX + '_' + column + '_istartswith',d+'_'+str(pk),0)
+					conn.zadd(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'istartswith'),d+'_'+str(pk),0)
 
-def delete_indexes(column,data,indexes,conn,hash_record,table,pk):
+def delete_indexes(column,data,indexes,conn,hash_record,table,pk,db_name):
 		for index in indexes:
 			if index == 'startswith':
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
 					d = val_for_insert(d)
-					conn.zrem(table +'_' + INDEX_KEY_INFIX + '_' + column + '_startswith',d+'_'+str(pk))
+					conn.zrem(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'startswith'),d+'_'+str(pk))
 			if index == 'istartswith':
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
 					d = val_for_insert(d).lower()
-					conn.zrem(table +'_' + INDEX_KEY_INFIX + '_' + column + '_istartswith',d.lower()+'_'+str(pk))
+					conn.zrem(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'istartswith'),d.lower()+'_'+str(pk))
 
-def filter_with_index(lookup,value,conn,table,column):
+def filter_with_index(lookup,value,conn,table,column,db_name):
 	if lookup in ('startswith','istartswith'):
 		if isinstance(value,unicode):
 			if lookup == 'startswith':v = value
 			else: v = value.lower()
 		else: v = unicode(value)
 		#v2 = v[:-1]+chr(ord(v[-1])+1) #last letter=next(last letter)
-		key = table +'_' + INDEX_KEY_INFIX + '_' + column + '_startswith'
+		key = get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'startswith')
 
 		pipeline = conn.pipeline()		
 		pipeline.zadd(key,v,0)

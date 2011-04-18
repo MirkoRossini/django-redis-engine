@@ -12,9 +12,9 @@ from django.db.models.sql import aggregates as sqlaggregates
 from django.db.models.sql.constants import MULTI, SINGLE
 from django.db.models.sql.where import AND, OR
 from django.utils.tree import Node
-from redis_entity import RedisEntity,split_db_type
+from redis_entity import RedisEntity,split_db_type,hash_for_redis,get_hash_key,get_set_key,get_list_key
 
-from index_utils import get_indexes,create_indexes,delete_indexes,filter_with_index,isiterable,hash_for_redis
+from index_utils import get_indexes,create_indexes,delete_indexes,filter_with_index,isiterable
 
 
 import redis
@@ -92,7 +92,8 @@ class DBQuery(NonrelQuery):
 	self.indexes = get_indexes()
 	self.indexes_for_model =  self.indexes.get(self.query.model,{})
 	self._collection = self.connection.db_connection
-
+	self.db_name = self.connection.db_name
+	
         self._ordering = []
         self.db_query = {}
 
@@ -109,7 +110,7 @@ class DBQuery(NonrelQuery):
 	#print 'here results ',results
         primarykey_column = self.query.get_meta().pk.column
         for e_id in results:
-            yield RedisEntity(e_id,self._collection,self.db_table,primarykey_column,self.query.get_meta())
+            yield RedisEntity(e_id,self._collection,self.db_table,primarykey_column,self.query.get_meta(),self.db_name)
 
     @safe_call
     def count(self, limit=None): #TODO is this right?
@@ -129,32 +130,33 @@ class DBQuery(NonrelQuery):
 			try:
 				db_type, db_subtype =  split_db_type(self.query.get_meta().get_field_by_name(field)[0].db_type())
 				if db_type in ('ListField','SetField'):
-					val = self._collection.lrange(db_table+'_'+field+'_'+str(res),0,-1)
+					val = self._collection.lrange(get_list_key(self.db_name,db_table,field,res),0,-1)
 				else:
-					val = self._collection.hget(db_table+'_'+str(res),field)
+					val = self._collection.hget(get_hash_key(self.db_name,db_table,res),field)
 			except:
 				val = None
 
 			if val is not None:
 				if not isinstance(val,list) and not isinstance(val,tuple):
-					self._collection.srem(db_table+'_'+field+'_'+hash_for_redis(val),str(res))
-					self._collection.hdel(db_table+'_'+str(res),field)
+					self._collection.srem(get_set_key(self.db_name,db_table,key,val),str(res))
+					self._collection.hdel(get_hash_key(self.db_name,db_table,res),field)
 
 				else:
 					for v in val:
 
-						self._collection.srem(db_table+'_'+field+'_'+hash_for_redis(v),str(res))
+						self._collection.srem(get_set_key(self.db_name,db_table,key,v),str(res))
 					del self._collection[db_table+'_'+field+'_'+str(res)]
 				if field in self.indexes_for_model:
 					delete_indexes(	field,
 							val,
 							self.indexes_for_model[field],
 							self._collection,
-							db_table+'_'+str(res),
+							get_hash_key(self.db_name,db_table,res),
 							db_table,
 							res,
+							self.db_name,
 							)
-		self._collection.srem(db_table+'_ids' ,res)
+		self._collection.srem(self.db_name+'_'+db_table+'_ids' ,res)
 		
 
 
@@ -218,7 +220,7 @@ class DBQuery(NonrelQuery):
 	
 	
 	
-	results = self._collection.smembers(db_table+'_ids')
+	results = self._collection.smembers(self.db_name+'_'+db_table+'_ids')
 	#print "GET RES", self.db_query
 	#print "RESULTS ORA",results
 	for column,filteradd in self.db_query.iteritems():
@@ -232,14 +234,14 @@ class DBQuery(NonrelQuery):
 				
 		else:
 			if lookup == 'exact':
-				results = results & self._collection.smembers(db_table+'_'+column+'_'+hash_for_redis(value))
+				results = results & self._collection.smembers(get_set_key(self.db_name,db_table,column,value))
 			elif lookup == 'in': #ListField or empty
 				tempset = set()
 				for v in value:
-					tempset = tempset.union(self._collection.smembers(db_table+'_'+column+'_'+hash_for_redis(v) ) )
+					tempset = tempset.union(self._collection.smembers(get_set_key(self.db_name,db_table,column,v) ) )
 				results = results & tempset
 			else:
-				tempset = filter_with_index(lookup,value,self._collection,db_table,column)
+				tempset = filter_with_index(lookup,value,self._collection,db_table,column,self.db_name)
 				if tempset is not None:
 					results = results & tempset
 				else:
@@ -341,6 +343,9 @@ class SQLCompiler(NonrelCompiler):
     def _collection(self):
         #TODO multi db
 	return self.connection.db_connection
+    @property
+    def db_name(self):
+        return self.connection.db_name
 
     def _save(self, data, return_id=False):
 
@@ -352,7 +357,7 @@ class SQLCompiler(NonrelCompiler):
 		pk = data['_id']
 		new = False
 	else:
-		pk = self._collection.incr(db_table+"_id")
+		pk = self._collection.incr(self.db_name+'_'+db_table+"_id")
 		new = True
 		
 	
@@ -361,30 +366,37 @@ class SQLCompiler(NonrelCompiler):
 		if new:
 			
 			if not isinstance(value,tuple) and not isinstance(value,list):
-				self._collection.hset(db_table+'_'+str(pk),key,value)
-				self._collection.sadd(db_table+'_'+key+'_'+hash_for_redis(value),pk)
+				self._collection.hset(get_hash_key(self.db_name,db_table,pk),key,value)
+				self._collection.sadd(get_set_key(self.db_name,db_table,key,value),pk)
 			else:
 				for v in value:
-					self._collection.sadd(db_table+'_'+key+'_'+hash_for_redis(v),pk)
-					self._collection.lpush(db_table+'_'+key+'_'+str(pk),v)
+					self._collection.sadd(
+								get_set_key(self.db_name,db_table,key,v),
+								pk  )
+					self._collection.lpush(get_list_key(self.db_name,db_table,key,pk),v)
 		else:
 			if not isinstance(value,tuple) and not isinstance(value,list):
-				old = self._collection.hget(db_table+'_'+str(pk),key)
+				old = self._collection.hget(get_hash_key(self.db_name,db_table,pk),key)
 			else:
-				old = self._collection.lrange(db_table+'_'+key+'_'+str(pk),0,-1)
+				old = self._collection.lrange(get_list_key(self.db_name,db_table,key,pk),0,-1)
 			if old != value:
 				
 				if not isinstance(value,tuple) and not isinstance(value,list):
-					self._collection.hset(db_table+'_'+str(pk),key,value)
-					self._collection.srem(db_table+'_'+key+'_'+hash_for_redis(old),pk)
-					self._collection.sadd(db_table+'_'+key+'_'+hash_for_redis(value),pk)
+					self._collection.hset(
+								get_hash_key(self.db_name,db_table,pk),
+								key,
+								value)
+					self._collection.srem(get_set_key(self.db_name,db_table,key,old),pk)
+					self._collection.sadd(get_set_key(self.db_name,db_table,key,value),pk)
 				else:
 
 					for v in old:
-						if v not in value: self._collection.srem(db_table+'_'+key+'_'+hash_for_redis(v),pk)
+						if v not in value: self._collection.srem(get_set_key(self.db_name,db_table,key,v),
+											pk)
 					for v in value:
-						if v not in old: self._collection.sadd(db_table+'_'+key+'_'+hash_for_redis(v),pk)
-						self._collection.lpush(db_table+'_'+key+'_'+str(pk),v)
+						if v not in old: self._collection.sadd(get_set_key(self.db_name,db_table,key,v),
+											pk)
+						self._collection.lpush(get_list_key(self.db_name,db_table,key,pk),v)
 						
 
 
@@ -396,9 +408,10 @@ class SQLCompiler(NonrelCompiler):
 					db_table+'_'+str(pk),
 					db_table,
 					pk,
+					self.db_name,
 					)
 	
-        if '_id' not in data: self.connection.db_connection.sadd(db_table+"_ids" ,pk)
+        if '_id' not in data: self.connection.db_connection.sadd(self.db_name+'_'+db_table+"_ids" ,pk)
 
 	
         if return_id:
