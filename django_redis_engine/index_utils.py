@@ -32,35 +32,49 @@ def get_indexes():
 	return indexes
 
 
-def create_indexes(column,data,indexes,conn,hash_record,table,pk,db_name):
+def create_indexes(column,data,old,indexes,conn,hash_record,table,pk,db_name):
+		#TODO zrem on update
 		for index in indexes:
-			if index == 'startswith':
+			if index in ('startswith','istartswith'):
+				if old is not None:
+					if not isiterable(old):
+						old = (old,)	
+					for d in old:
+						if index == 'istartswith': d = d.lower()
+						conn.zrem(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'startswith'),d+'_'+str(pk))
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
 					d = val_for_insert(d)
-					conn.zadd(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'startswith'),d+'_'+str(pk),0)
-			if index == 'istartswith':
+					if index == 'istartswith': d = d.lower()
+					conn.zadd(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,index),d+'_'+str(pk),0)
+			if index == 'exact':
+				if old is not None:
+					if not isiterable(old):
+						old = (old,)	
+					for d in old:
+						conn.srem(get_set_key(db_name,table,column,d),str(pk))
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
-					d = val_for_insert(d).lower()
-					conn.zadd(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'istartswith'),d+'_'+str(pk),0)
+					d = val_for_insert(d)
+					conn.sadd(get_set_key(db_name,table,column,d),pk)
 
 def delete_indexes(column,data,indexes,conn,hash_record,table,pk,db_name):
 		for index in indexes:
-			if index == 'startswith':
+			if index in ('startswith','istartswith'):
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
 					d = val_for_insert(d)
-					conn.zrem(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'startswith'),d+'_'+str(pk))
-			if index == 'istartswith':
+					if index == 'istartswith': d = d.lower()
+					conn.zrem(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,index),d+'_'+str(pk))
+			if index == 'exact':
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
-					d = val_for_insert(d).lower()
-					conn.zrem(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'istartswith'),d.lower()+'_'+str(pk))
+					d = val_for_insert(d)
+					conn.srem(get_set_key(db_name,table,column,d),str(pk))
 
 def filter_with_index(lookup,value,conn,table,column,db_name):
 	if lookup in ('startswith','istartswith'):

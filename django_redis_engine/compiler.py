@@ -93,7 +93,7 @@ class DBQuery(NonrelQuery):
 	self.indexes_for_model =  self.indexes.get(self.query.model,{})
 	self._collection = self.connection.db_connection
 	self.db_name = self.connection.db_name
-	
+	#self.connection.exact_all
         self._ordering = []
         self.db_query = {}
 
@@ -138,18 +138,21 @@ class DBQuery(NonrelQuery):
 
 			if val is not None:
 				if not isinstance(val,list) and not isinstance(val,tuple):
-					self._collection.srem(get_set_key(self.db_name,db_table,key,val),str(res))
 					self._collection.hdel(get_hash_key(self.db_name,db_table,res),field)
 
 				else:
-					for v in val:
-
-						self._collection.srem(get_set_key(self.db_name,db_table,key,v),str(res))
 					del self._collection[db_table+'_'+field+'_'+str(res)]
-				if field in self.indexes_for_model:
+				#INDEXES
+				if field in self.indexes_for_model or self.connection.exact_all:
+					try:
+						indexes_for_field = self.indexes_for_model[field]
+					except KeyError:
+						indexes_for_field = ()
+					if 'exact' not in indexes_for_field and self.connection.exact_all:
+						indexes_for_field += 'exact',
 					delete_indexes(	field,
 							val,
-							self.indexes_for_model[field],
+							indexes_for_field,
 							self._collection,
 							get_hash_key(self.db_name,db_table,res),
 							db_table,
@@ -172,7 +175,7 @@ class DBQuery(NonrelQuery):
             if order == self.query.get_meta().pk.column:
                 order = '_id'
             else:
-		raise DatabaseError('You can only order by PK')
+		pass #raise DatabaseError('You can only order by PK') TODO check when order index support is active
             self._ordering.append((order, direction))
         return self
 
@@ -199,9 +202,11 @@ class DBQuery(NonrelQuery):
 	
 	else:
 		if lookup_type in ('exact','in'):
-			self.db_query.update({column:{lookup_type:value}})
+			if not self.connection.exact_all and 'exact' not  in self.indexes_for_model.get(column,()):
+				raise DatabaseError('Lookup %s on column %s is not allowed (have you tried redis_indexes? )' % (lookup_type,column))
+			else:self.db_query.update({column:{lookup_type:value}})
 		else:
-			if column in self.indexes_for_model and lookup_type  in self.indexes_for_model.get(column):
+			if lookup_type  in self.indexes_for_model.get(column,()):
 				self.db_query.update({column:{lookup_type:value}})
 			
 			else:
@@ -221,11 +226,11 @@ class DBQuery(NonrelQuery):
 	
 	
 	results = self._collection.smembers(self.db_name+'_'+db_table+'_ids')
-	#print "GET RES", self.db_query
-	#print "RESULTS ORA",results
+
+
 	for column,filteradd in self.db_query.iteritems():
 		lookup,value = filteradd.popitem()#TODO tuple better?
-		#print "COSE:",pk_column == column,pk_column, column,value
+
 		if pk_column == column:
 			if lookup == 'in': #TODO meglio??
 				results = results & set(value)   #IN filter
@@ -247,7 +252,7 @@ class DBQuery(NonrelQuery):
 				else:
 					results = set()
 								
-	#print results
+
         if self._ordering:
 	    if self._ordering[0][1] == 'desc': 
 		results.reverse()
@@ -260,8 +265,8 @@ class DBQuery(NonrelQuery):
 
         elif self.query.high_mark is not None:
             results = list(results)[:self.query.high_mark]
-	#print list(results )
-        return list(results )
+
+        return list(results)
 
 class SQLCompiler(NonrelCompiler):
     """
@@ -364,15 +369,12 @@ class SQLCompiler(NonrelCompiler):
 	for key,value in data.iteritems():
 		
 		if new:
-			
+			old = None
 			if not isinstance(value,tuple) and not isinstance(value,list):
 				self._collection.hset(get_hash_key(self.db_name,db_table,pk),key,value)
-				self._collection.sadd(get_set_key(self.db_name,db_table,key,value),pk)
+				
 			else:
 				for v in value:
-					self._collection.sadd(
-								get_set_key(self.db_name,db_table,key,v),
-								pk  )
 					self._collection.lpush(get_list_key(self.db_name,db_table,key,pk),v)
 		else:
 			if not isinstance(value,tuple) and not isinstance(value,list):
@@ -386,24 +388,24 @@ class SQLCompiler(NonrelCompiler):
 								get_hash_key(self.db_name,db_table,pk),
 								key,
 								value)
-					self._collection.srem(get_set_key(self.db_name,db_table,key,old),pk)
-					self._collection.sadd(get_set_key(self.db_name,db_table,key,value),pk)
 				else:
 
-					for v in old:
-						if v not in value: self._collection.srem(get_set_key(self.db_name,db_table,key,v),
-											pk)
 					for v in value:
 						if v not in old: self._collection.sadd(get_set_key(self.db_name,db_table,key,v),
 											pk)
 						self._collection.lpush(get_list_key(self.db_name,db_table,key,pk),v)
-						
 
-
-		if key in indexes_for_model:
+		if key in indexes_for_model or self.connection.exact_all:
+			try:
+				indexes_for_field = indexes_for_model[key]
+			except KeyError:
+				indexes_for_field = ()
+			if 'exact' not in indexes_for_field and self.connection.exact_all:
+				indexes_for_field += 'exact',
 			create_indexes(	key,
 					value,
-					indexes_for_model[key],
+					old,
+					indexes_for_field,
 					self._collection,
 					db_table+'_'+str(pk),
 					db_table,
