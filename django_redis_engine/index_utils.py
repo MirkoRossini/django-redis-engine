@@ -35,18 +35,23 @@ def get_indexes():
 def create_indexes(column,data,old,indexes,conn,hash_record,table,pk,db_name):
 		#TODO zrem on update
 		for index in indexes:
-			if index in ('startswith','istartswith'):
+			if index in ('startswith','istartswith','endswith','iendswith'):
 				if old is not None:
 					if not isiterable(old):
 						old = (old,)	
 					for d in old:
 						if index == 'istartswith': d = d.lower()
-						conn.zrem(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'startswith'),d+'_'+str(pk))
+						if index == 'endswith': d = d[::-1]
+						if index == 'iendswith': d = d.lower()[::-1]
+						conn.zrem(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,index),d+'_'+str(pk))
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
 					d = val_for_insert(d)
 					if index == 'istartswith': d = d.lower()
+					if index == 'endswith': d = d[::-1]
+					if index == 'iendswith': d = d.lower()[::-1]
+						
 					conn.zadd(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,index),d+'_'+str(pk),0)
 			if index == 'exact':
 				if old is not None:
@@ -62,12 +67,14 @@ def create_indexes(column,data,old,indexes,conn,hash_record,table,pk,db_name):
 
 def delete_indexes(column,data,indexes,conn,hash_record,table,pk,db_name):
 		for index in indexes:
-			if index in ('startswith','istartswith'):
+			if index in ('startswith','istartswith','endswith','iendswith'):
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
 					d = val_for_insert(d)
 					if index == 'istartswith': d = d.lower()
+					if index == 'endswith': d = d[::-1]
+					if index == 'iendswith': d = d.lower()[::-1]
 					conn.zrem(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,index),d+'_'+str(pk))
 			if index == 'exact':
 				if not isiterable(data):
@@ -77,13 +84,15 @@ def delete_indexes(column,data,indexes,conn,hash_record,table,pk,db_name):
 					conn.srem(get_set_key(db_name,table,column,d),str(pk))
 
 def filter_with_index(lookup,value,conn,table,column,db_name):
-	if lookup in ('startswith','istartswith'):
+	if lookup in ('startswith','istartswith','endswith','iendswith'):
 		if isinstance(value,unicode):
 			if lookup == 'startswith':v = value
-			else: v = value.lower()
+			elif lookup == 'istartswith': v = value.lower()
+			elif lookup == 'iendswith': v = value.lower()[::-1]
+			elif lookup == 'endswith': v = value[::-1]
 		else: v = unicode(value)
 		#v2 = v[:-1]+chr(ord(v[-1])+1) #last letter=next(last letter)
-		key = get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,'startswith')
+		key = get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,lookup)
 
 		pipeline = conn.pipeline()		
 		pipeline.zadd(key,v,0)
