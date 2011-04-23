@@ -17,7 +17,8 @@ isiterable = lambda obj: getattr(obj, '__iter__', False)
 def val_for_insert(d):
 	if isinstance(d,unicode):
 	  d = d
-	else : d = unicode(d)
+	elif isinstance(d,basestring) : d = unicode(d.decode('utf-8'))
+	else: d = unicode(d)
         return d
 
 
@@ -33,7 +34,6 @@ def get_indexes():
 
 
 def create_indexes(column,data,old,indexes,conn,hash_record,table,pk,db_name):
-		#TODO zrem on update
 		for index in indexes:
 			if index in ('startswith','istartswith','endswith','iendswith'):
 				if old is not None:
@@ -85,12 +85,15 @@ def delete_indexes(column,data,indexes,conn,hash_record,table,pk,db_name):
 
 def filter_with_index(lookup,value,conn,table,column,db_name):
 	if lookup in ('startswith','istartswith','endswith','iendswith'):
-		if isinstance(value,unicode):
-			if lookup == 'startswith':v = value
-			elif lookup == 'istartswith': v = value.lower()
-			elif lookup == 'iendswith': v = value.lower()[::-1]
-			elif lookup == 'endswith': v = value[::-1]
-		else: v = unicode(value)
+		if not isinstance(value,unicode):
+			if isinstance(value,basestring):
+				value = unicode(value.decode('utf-8'))
+			else: value = unicode(value)
+		if lookup == 'startswith':v = value
+		elif lookup == 'istartswith': v = value.lower()
+		elif lookup == 'iendswith': v = value.lower()[::-1]
+		elif lookup == 'endswith': v = value[::-1]
+		
 		#v2 = v[:-1]+chr(ord(v[-1])+1) #last letter=next(last letter)
 		key = get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,lookup)
 
@@ -98,7 +101,7 @@ def filter_with_index(lookup,value,conn,table,column,db_name):
 		pipeline.zadd(key,v,0)
 		#pipeline.zadd(key,v2,0)
 		pipeline.execute()
-		
+
 		conn.watch(key)
 		up = conn.zrank(key,v)
 		#down = conn.zrank(key,v2)
@@ -109,7 +112,7 @@ def filter_with_index(lookup,value,conn,table,column,db_name):
 		l = pipeline.execute()
 		#print l
 		r = l[0]
-		
+
 		#print 'erre: ',r
 		#print 'second pipeline',pipeline.execute()
 		ret = set()
@@ -124,3 +127,6 @@ def filter_with_index(lookup,value,conn,table,column,db_name):
 	else:
 		raise Exception('Lookup type not supported') #TODO check at index creation?
 	
+
+
+# 

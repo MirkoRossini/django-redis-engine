@@ -106,6 +106,7 @@ class DBQuery(NonrelQuery):
         return self._collection
 
     def fetch(self, low_mark, high_mark):
+
         results = self._get_results()
 	#print 'here results ',results
         primarykey_column = self.query.get_meta().pk.column
@@ -123,6 +124,7 @@ class DBQuery(NonrelQuery):
     def delete(self):
 
 	db_table = self.query.get_meta().db_table
+	pipeline = self._collection.pipeline()
 
 	for res in self._get_results():
 		for  field in self.query.get_meta().get_all_field_names():
@@ -138,10 +140,10 @@ class DBQuery(NonrelQuery):
 
 			if val is not None:
 				if not isinstance(val,list) and not isinstance(val,tuple):
-					self._collection.hdel(get_hash_key(self.db_name,db_table,res),field)
+					pipeline.hdel(get_hash_key(self.db_name,db_table,res),field)
 
 				else:
-					del self._collection[db_table+'_'+field+'_'+str(res)]
+					pipeline.delete(db_table+'_'+field+'_'+str(res))
 				#INDEXES
 				if field in self.indexes_for_model or self.connection.exact_all:
 					try:
@@ -153,14 +155,14 @@ class DBQuery(NonrelQuery):
 					delete_indexes(	field,
 							val,
 							indexes_for_field,
-							self._collection,
+							pipeline,
 							get_hash_key(self.db_name,db_table,res),
 							db_table,
 							res,
 							self.db_name,
 							)
-		self._collection.srem(self.db_name+'_'+db_table+'_ids' ,res)
-		
+		pipeline.srem(self.db_name+'_'+db_table+'_ids' ,res)
+		pipeline.execute()
 
 
     @safe_call
@@ -357,6 +359,9 @@ class SQLCompiler(NonrelCompiler):
 	db_table = self.query.get_meta().db_table
 	indexes = get_indexes()
 	indexes_for_model =  indexes.get(self.query.model,{})
+
+	pipeline = self._collection.pipeline()
+
 	#TODO: multi_db name
 	if '_id' in data:
 		pk = data['_id']
@@ -371,11 +376,11 @@ class SQLCompiler(NonrelCompiler):
 		if new:
 			old = None
 			if not isinstance(value,tuple) and not isinstance(value,list):
-				self._collection.hset(get_hash_key(self.db_name,db_table,pk),key,value)
+				pipeline.hset(get_hash_key(self.db_name,db_table,pk),key,value)
 				
 			else:
 				for v in value:
-					self._collection.lpush(get_list_key(self.db_name,db_table,key,pk),v)
+					pipeline.lpush(get_list_key(self.db_name,db_table,key,pk),v)
 		else:
 			if not isinstance(value,tuple) and not isinstance(value,list):
 				old = self._collection.hget(get_hash_key(self.db_name,db_table,pk),key)
@@ -384,16 +389,16 @@ class SQLCompiler(NonrelCompiler):
 			if old != value:
 				
 				if not isinstance(value,tuple) and not isinstance(value,list):
-					self._collection.hset(
+					pipeline.hset(
 								get_hash_key(self.db_name,db_table,pk),
 								key,
 								value)
 				else:
 
 					for v in value:
-						if v not in old: self._collection.sadd(get_set_key(self.db_name,db_table,key,v),
+						if v not in old: pipeline.sadd(get_set_key(self.db_name,db_table,key,v),
 											pk)
-						self._collection.lpush(get_list_key(self.db_name,db_table,key,pk),v)
+						pipeline.lpush(get_list_key(self.db_name,db_table,key,pk),v)
 
 		if key in indexes_for_model or self.connection.exact_all:
 			try:
@@ -413,9 +418,9 @@ class SQLCompiler(NonrelCompiler):
 					self.db_name,
 					)
 	
-        if '_id' not in data: self.connection.db_connection.sadd(self.db_name+'_'+db_table+"_ids" ,pk)
+        if '_id' not in data: pipeline.sadd(self.db_name+'_'+db_table+"_ids" ,pk)
 
-	
+	pipeline.execute()
         if return_id:
             return unicode(pk)
 

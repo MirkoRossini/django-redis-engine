@@ -1,0 +1,8 @@
+23-04-2011
+
+Added tests for (i)endswith 
+
+
+General optimization with pipelines and persistent connections
+
+

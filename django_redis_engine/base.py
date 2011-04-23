@@ -83,6 +83,11 @@ class DatabaseWrapper(NonrelDatabaseWrapper):
         self.introspection = DatabaseIntrospection(self)
 
     def _cursor(self):
+	
+	try:
+		return self._connection
+	except:
+		pass
         self._connect()
         return self._connection
 
@@ -92,10 +97,19 @@ class DatabaseWrapper(NonrelDatabaseWrapper):
         Returns the db_connection instance
          
         """
-        self._connect()
+	try:
+		if self._connection is not None:
+			return self._connection
+	except:
+	        self._connect()
         return self._db_connection
 
     def _connect(self):
+	import traceback
+	import sys
+	#print '-------------------'
+	#traceback.print_stack()
+	#print '-------------------'
         if not self._connected:
             host = self.settings_dict['HOST'] or None
             port = self.settings_dict.get('PORT', None) or None
