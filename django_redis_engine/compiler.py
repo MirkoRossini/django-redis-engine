@@ -12,11 +12,11 @@ from django.db.models.sql import aggregates as sqlaggregates
 from django.db.models.sql.constants import MULTI, SINGLE
 from django.db.models.sql.where import AND, OR
 from django.utils.tree import Node
-from redis_entity import RedisEntity,split_db_type,hash_for_redis,get_hash_key,get_set_key,get_list_key
+from redis_entity import RedisEntity,split_db_type,hash_for_redis,get_hash_key,get_set_key,get_list_key,enpickle,unpickle
 
 from index_utils import get_indexes,create_indexes,delete_indexes,filter_with_index,isiterable
 
-
+import pickle
 import redis
 
 
@@ -124,26 +124,20 @@ class DBQuery(NonrelQuery):
     def delete(self):
 
 	db_table = self.query.get_meta().db_table
-	pipeline = self._collection.pipeline()
+	results = self._get_results()
+	
+	pipeline = self._collection.pipeline(transaction = False)
+	for res in results:
+		pipeline.hgetall(get_hash_key(self.db_name,db_table,res))
+	hmaps_ret = pipeline.execute()
+	hmaps = ((results[n],hmaps_ret[n]) for n in range(len(hmaps_ret)))
 
-	for res in self._get_results():
-		for  field in self.query.get_meta().get_all_field_names():
-
-			try:
-				db_type, db_subtype =  split_db_type(self.query.get_meta().get_field_by_name(field)[0].db_type())
-				if db_type in ('ListField','SetField'):
-					val = self._collection.lrange(get_list_key(self.db_name,db_table,field,res),0,-1)
-				else:
-					val = self._collection.hget(get_hash_key(self.db_name,db_table,res),field)
-			except:
-				val = None
-
+	pipeline = self._collection.pipeline(transaction = False)
+	for res,hmap in hmaps:
+		pipeline.delete(get_hash_key(self.db_name,db_table,res))
+		for field,val in hmap.iteritems():
+			val = unpickle(val)
 			if val is not None:
-				if not isinstance(val,list) and not isinstance(val,tuple):
-					pipeline.hdel(get_hash_key(self.db_name,db_table,res),field)
-
-				else:
-					pipeline.delete(db_table+'_'+field+'_'+str(res))
 				#INDEXES
 				if field in self.indexes_for_model or self.connection.exact_all:
 					try:
@@ -162,7 +156,7 @@ class DBQuery(NonrelQuery):
 							self.db_name,
 							)
 		pipeline.srem(self.db_name+'_'+db_table+'_ids' ,res)
-		pipeline.execute()
+	pipeline.execute()
 
 
     @safe_call
@@ -220,12 +214,8 @@ class DBQuery(NonrelQuery):
 	see self.db_query, lookup parameters format: {'column': {lookup:value}}
 	
 	"""
-	#print self.db_query
 	pk_column = self.query.get_meta().pk.column
-	db_table = self.query.get_meta().db_table
-
-	
-	
+	db_table = self.query.get_meta().db_table	
 	
 	results = self._collection.smembers(self.db_name+'_'+db_table+'_ids')
 
@@ -360,45 +350,30 @@ class SQLCompiler(NonrelCompiler):
 	indexes = get_indexes()
 	indexes_for_model =  indexes.get(self.query.model,{})
 
-	pipeline = self._collection.pipeline()
+	pipeline = self._collection.pipeline(transaction = False)
 
-	#TODO: multi_db name
+	h_map = {}
+	h_map_old = {}
+
 	if '_id' in data:
 		pk = data['_id']
 		new = False
+		h_map_old = self._collection.hgetall(get_hash_key(self.db_name,db_table,pk))
 	else:
 		pk = self._collection.incr(self.db_name+'_'+db_table+"_id")
-		new = True
-		
+		new = True		
 	
 	for key,value in data.iteritems():
 		
 		if new:
 			old = None
-			if not isinstance(value,tuple) and not isinstance(value,list):
-				pipeline.hset(get_hash_key(self.db_name,db_table,pk),key,value)
-				
-			else:
-				for v in value:
-					pipeline.lpush(get_list_key(self.db_name,db_table,key,pk),v)
+			h_map[key] = pickle.dumps(value)			
 		else:
-			if not isinstance(value,tuple) and not isinstance(value,list):
-				old = self._collection.hget(get_hash_key(self.db_name,db_table,pk),key)
-			else:
-				old = self._collection.lrange(get_list_key(self.db_name,db_table,key,pk),0,-1)
-			if old != value:
-				
-				if not isinstance(value,tuple) and not isinstance(value,list):
-					pipeline.hset(
-								get_hash_key(self.db_name,db_table,pk),
-								key,
-								value)
-				else:
+			if key == "_id": continue
+			old = pickle.loads(h_map_old[key])
 
-					for v in value:
-						if v not in old: pipeline.sadd(get_set_key(self.db_name,db_table,key,v),
-											pk)
-						pipeline.lpush(get_list_key(self.db_name,db_table,key,pk),v)
+			if old != value:
+				h_map[key] = pickle.dumps(value)
 
 		if key in indexes_for_model or self.connection.exact_all:
 			try:
@@ -411,7 +386,7 @@ class SQLCompiler(NonrelCompiler):
 					value,
 					old,
 					indexes_for_field,
-					self._collection,
+					pipeline,
 					db_table+'_'+str(pk),
 					db_table,
 					pk,
@@ -419,7 +394,8 @@ class SQLCompiler(NonrelCompiler):
 					)
 	
         if '_id' not in data: pipeline.sadd(self.db_name+'_'+db_table+"_ids" ,pk)
-
+	
+	pipeline.hmset(get_hash_key(self.db_name,db_table,pk),h_map)			
 	pipeline.execute()
         if return_id:
             return unicode(pk)

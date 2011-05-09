@@ -9,7 +9,7 @@ from redis.exceptions import WatchError
 
 INDEX_KEY_INFIX = "redis_index"
 
-SWITH_INDEX_SEPARATOR = '\x02'
+SWITH_INDEX_SEPARATOR = '\x00'
 
 isiterable = lambda obj: getattr(obj, '__iter__', False)
 

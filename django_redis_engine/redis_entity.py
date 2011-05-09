@@ -1,6 +1,6 @@
 from django.db.models.fields import FieldDoesNotExist
 from md5 import md5
-
+import pickle
 
 class RedisEntity(object):
 	def __init__(self,e_id,connection,db_table, pkcolumn, querymeta, db_name):
@@ -10,21 +10,17 @@ class RedisEntity(object):
 		self.pkcolumn = pkcolumn
 		self.querymeta = querymeta
 		self.db_name = db_name
+		self.data = self.connection.hgetall(get_hash_key(self.db_name,self.db_table,self.id))
+		
+		
 	def get(self,what,value):
+		
+		if what in self.data:
+			return unpickle(self.data[what])
 		if what == self.pkcolumn:
 			return self.id
 		else:
-			
-			try:
-				db_type, db_subtype =  split_db_type(self.querymeta.get_field_by_name(what)[0].db_type())
-
-				if db_type in ('ListField','SetField'):
-					return self.connection.lrange(get_list_key(self.db_name,self.db_table,what,self.id),0,-1)
-
-			except FieldDoesNotExist: #Field does not exist, related. TODO Clean this up, find a smarter way
-				pass
-			return self.connection.hget(get_hash_key(self.db_name,self.db_table,self.id), what)
-						
+			return unpickle(self.connection.hget(get_hash_key(self.db_name,self.db_table,self.id), what))				
 
 
 def split_db_type(db_type):
@@ -47,6 +43,19 @@ def get_list_key(db_name,db_table,key,pk):
 
 def get_set_key(db_name,db_table,key,value):
 	return db_name+'_'+db_table+'_'+key+'_'+hash_for_redis(value)
+
+def unpickle(val):
+	if val is None:
+		return None
+	else:
+		return pickle.loads(val)
+
+def enpickle(val):
+	if val is None:
+		return None
+	else:
+		return pickle.dumps(val)
+
 
 def hash_for_redis(val):
 	if isinstance(val,unicode):
