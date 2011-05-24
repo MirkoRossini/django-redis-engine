@@ -3,19 +3,23 @@ from md5 import md5
 import pickle
 
 class RedisEntity(object):
-	def __init__(self,e_id,connection,db_table, pkcolumn, querymeta, db_name):
+	def __init__(self,e_id,connection,db_table, pkcolumn, querymeta, db_name,empty):
 		self.id = e_id
 		self.connection = connection
 		self.db_table = db_table
 		self.pkcolumn = pkcolumn
 		self.querymeta = querymeta
 		self.db_name = db_name
-		self.data = self.connection.hgetall(get_hash_key(self.db_name,self.db_table,self.id))
+		self.empty = empty
+		if not empty:
+			self.data = self.connection.hgetall(get_hash_key(self.db_name,self.db_table,self.id))
 		
 		
 	def get(self,what,value):
 		
+		if self.empty: return ''
 		if what in self.data:
+			#print self.data,self.data[what]
 			return unpickle(self.data[what])
 		if what == self.pkcolumn:
 			return self.id

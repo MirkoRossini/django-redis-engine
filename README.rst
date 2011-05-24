@@ -1,6 +1,6 @@
-=========================================
- Django Redis Engine for django-nonrel
-=========================================
+==========================================
+ Django Redis Engine for django-nonrel 0.1
+==========================================
 
 Requirements
 ============
@@ -15,12 +15,21 @@ Optional Requirements
 ============
 * dbindexer
 
+Features
+========
+Indexing for:
+* startswith,istartswith
+* endswith,iendswith
+* gt,gte,lt,lte
+* contains (using dbindexer)
+
+Redis transaction support: you can execute multiple insert of django objects in one single pipeline. See testproject/testapp/tests.py
+Count queries
+
+
 Missing features
 ===========
-DB creation support (raises exceptions)
-Test database support
-Some more redis indexes 
-
+Aggregate queries
 Documentation (although testproject is self-documented)
 
 

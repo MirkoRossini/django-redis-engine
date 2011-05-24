@@ -4,7 +4,11 @@ from django.test import TestCase
 from models import *
 from md5 import md5
 import random
+
+from django_redis_engine import redis_transaction
+from django.db import transaction
 class SimpleTest(TestCase):
+
     def test_update_and_filters(self):
 	"""
 	test effects of updates on filters
@@ -27,27 +31,38 @@ class SimpleTest(TestCase):
         self.failUnlessEqual(len(posts), 1)
 	post.delete()
 	
-#    def test_stress_test(self):
-#	"""
-#	stress test
-#	"""
-#	l = []
-#	for i in range(1000):
-#		tit = md5(str(random.random())+str(i)).hexdigest()
-#		l.append(tit)
-#		Post.objects.create(
-#				title = tit,
-#				text = " ".join(
-#						[md5(
-#							str(random.random())+\
-#							str(t)+\
-#							str(i)).hexdigest() for t in range(20)]
-#						)
-#				)
-#	for i in range(1000):
-#		p = Post.objects.get(title = l[random.randint(1,999)] )
-#		#self.failUnlessEqual(len(posts), 1)
-#
+    def atest_insert_transaction(self):
+	"""
+	stress test, used to find out how much network latency
+	affects performance using transactions.
+	"""
+	n = 100
+	ng = 100
+	ngc = 100
+	l = []
+	#print redis_transaction.commit_manually(using = 'native')
+	#print transaction.commit_manually()
+	with redis_transaction.commit_manually(using = 'native'):
+		print "begin"
+		for i in range(n):
+			tit = md5(str(random.random())+str(i)).hexdigest()
+			l.append(tit)
+			Post.objects.create(
+					title = tit,
+					text = " ".join(
+							[md5(
+								str(random.random())+\
+								str(t)+\
+								str(i)).hexdigest() for t in range(20)]
+							)
+					)
+		redis_transaction.commit()
+	for i in range(ng):
+		p = Post.objects.get(title = l[random.randint(0,n-1)] )
+	for i in range(ngc):
+		Post.objects.filter(title__contains = l[random.randint(0,n-1)])
+		#self.failUnlessEqual(len(posts), 1)
+
     def test_add_post_answers_and_filters(self):
         """
         Create some posts, create answers to them,
@@ -56,6 +71,7 @@ class SimpleTest(TestCase):
 	test endswith filter on post title
 	test iendswith filter on post text
 	test exact filter on all fields
+	test gt and lte filters
 	test deletion of objects and indexes 
         """
         post1 = Post.objects.create(
@@ -118,3 +134,21 @@ class SimpleTest(TestCase):
 	a.delete()
 	answers = Answer.objects.filter(text = 'answer2 to post 1')
 	self.failUnlessEqual(len(answers), 0)
+	
+	import datetime
+	posts = Post.objects.filter(text__iendswith = 'QQÀ',
+				time__gt = datetime.datetime.now() - datetime.timedelta(minutes = 10))
+	self.failUnlessEqual(len(posts), 1)
+	posts = Post.objects.filter(time__gt = datetime.datetime.now() - datetime.timedelta(minutes = 10))
+	self.failUnlessEqual(len(posts), 2)
+
+	posts = Post.objects.filter(time__lte = posts[0].time)
+	self.failUnlessEqual(len(posts), 1)
+
+	posts = Post.objects.filter(time__lte = posts[0].time + datetime.timedelta(minutes = 10))
+	self.failUnlessEqual(len(posts), 2)
+
+
+
+
+

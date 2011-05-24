@@ -13,7 +13,7 @@ SWITH_INDEX_SEPARATOR = '\x00'
 
 isiterable = lambda obj: getattr(obj, '__iter__', False)
 
-
+import datetime
 
 def val_for_insert(d):
 	if isinstance(d,unicode):
@@ -33,27 +33,39 @@ def get_indexes():
         
 	return indexes
 
+def prepare_value_for_index(index,val):
+	if index == 'startswith': return val
+	if index == 'istartswith': return val.lower()
+	if index == 'endswith': return val[::-1]
+	if index == 'iendswith': return val.lower()[::-1]
+	if index in ('gt','gte','lt','lte'):
+		if isinstance(val,datetime.datetime):
+			return "%04d%02d%02d%02d%02d" % (val.year,val.month,val.day,val.hour,val.minute)
+		if isinstance(val,datetime.time):
+			return "%02d%02d" % (val.hour,val.minute)
+		if isinstance(val,datetime.date):
+			return "%04d%02d%02d" % (val.year,val.month,val.day)
+		if isinstance(val,int):
+			return "%20d" % val
+	return val
+	
+
 
 def create_indexes(column,data,old,indexes,conn,hash_record,table,pk,db_name):
 		for index in indexes:
-			if index in ('startswith','istartswith','endswith','iendswith'):
+			if index in ('startswith','istartswith','endswith','iendswith','gt','gte','lt','lte'):
 				if old is not None:
 					if not isiterable(old):
 						old = (old,)	
 					for d in old:
-						if index == 'istartswith': d = d.lower()
-						if index == 'endswith': d = d[::-1]
-						if index == 'iendswith': d = d.lower()[::-1]
+						d = prepare_value_for_index(index,d)
 						conn.zrem(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,index),
 										d+SWITH_INDEX_SEPARATOR+str(pk))
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
 					d = val_for_insert(d)
-					if index == 'istartswith': d = d.lower()
-					if index == 'endswith': d = d[::-1]
-					if index == 'iendswith': d = d.lower()[::-1]
-						
+					d = prepare_value_for_index(index,d)						
 					conn.zadd(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,index),
 										d+SWITH_INDEX_SEPARATOR+str(pk),0)
 			if index == 'exact':
@@ -68,16 +80,15 @@ def create_indexes(column,data,old,indexes,conn,hash_record,table,pk,db_name):
 					d = val_for_insert(d)
 					conn.sadd(get_set_key(db_name,table,column,d),pk)
 
+
 def delete_indexes(column,data,indexes,conn,hash_record,table,pk,db_name):
 		for index in indexes:
-			if index in ('startswith','istartswith','endswith','iendswith'):
+			if index in ('startswith','istartswith','endswith','iendswith','gt','gte','lt','lte'):
 				if not isiterable(data):
 					data = (data,)
 				for d in data:
 					d = val_for_insert(d)
-					if index == 'istartswith': d = d.lower()
-					if index == 'endswith': d = d[::-1]
-					if index == 'iendswith': d = d.lower()[::-1]
+					d = prepare_value_for_index(index,d)
 					conn.zrem(get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,index),
 									d+SWITH_INDEX_SEPARATOR+str(pk))
 			if index == 'exact':
@@ -88,15 +99,9 @@ def delete_indexes(column,data,indexes,conn,hash_record,table,pk,db_name):
 					conn.srem(get_set_key(db_name,table,column,d),str(pk))
 
 def filter_with_index(lookup,value,conn,table,column,db_name):
-	if lookup in ('startswith','istartswith','endswith','iendswith'):
-		if not isinstance(value,unicode):
-			if isinstance(value,basestring):
-				value = unicode(value.decode('utf-8'))
-			else: value = unicode(value)
-		if lookup == 'startswith':v = value
-		elif lookup == 'istartswith': v = value.lower()
-		elif lookup == 'iendswith': v = value.lower()[::-1]
-		elif lookup == 'endswith': v = value[::-1]
+	if lookup in ('startswith','istartswith','endswith','iendswith',):
+		value = val_for_insert(value)
+		v = prepare_value_for_index(lookup,value)
 		
 		#v2 = v[:-1]+chr(ord(v[-1])+1) #last letter=next(last letter)
 		key = get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,lookup)
@@ -134,6 +139,35 @@ def filter_with_index(lookup,value,conn,table,column,db_name):
 			except WatchError:
 				pass
 #		print pipeline.execute()
+
+	elif lookup in ('gt','gte','lt','lte'):
+		value = val_for_insert(value)
+		v = prepare_value_for_index(lookup,value)
+		key = get_zset_index_key(db_name,table,INDEX_KEY_INFIX,column,lookup)
+		pipeline = conn.pipeline()
+		conn.zadd(key,v,0)
+		while True:
+			try:
+				conn.watch(key)
+				up = conn.zrank(key,v)
+				if lookup in ('lt','lte'):
+					pipeline.zrange(key,0,up+1)
+				else:
+					pipeline.zrange(key,up+1,-1)
+				pipeline.zrem(key,v)
+				l = pipeline.execute()
+				r = l[0]
+				ret = set()
+				for i in r:
+					i = unicode(i.decode('utf8'))
+					splitted_string = i.split(SWITH_INDEX_SEPARATOR)
+					if len(splitted_string) > 0 and\
+						 (lookup in ('gte','lte') or\
+							"".join(splitted_string[:-1]) != value):
+							ret.add(splitted_string[-1])
+				return ret
+			except WatchError:
+				pass
 	else:
 		raise Exception('Lookup type not supported') #TODO check at index creation?
 	
